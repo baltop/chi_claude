@@ -68,9 +68,13 @@ func main() {
 		w.Write([]byte("Welcome to the API Gateway"))
 	})
 
-	r.Route("/api", func(sub_r chi.Router) {
-		sub_r.Mount("/service-a", http.StripPrefix("/api/service-a", proxyHandlerA(serviceA)))
-		sub_r.With(apiKeyMiddleware).Get("/service-b", proxyHandlerB(serviceB))
+	r.Route("/api", func(r chi.Router) {
+		r.With(stripPrefixMiddleware).Get("/service-b/*", proxyHandlerB(serviceB))
+		r.With(apiKeyMiddleware).Get("/left", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("left road"))
+		})
+		r.Mount("/service-a", apiKeyMiddleware(http.StripPrefix("/api/service-a", proxyHandlerA(serviceA))))
+
 	})
 
 	r.Handle("/metrics", promhttp.Handler())

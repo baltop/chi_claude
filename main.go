@@ -36,6 +36,11 @@ var (
 	)
 )
 
+func init() {
+	prometheus.MustRegister(httpRequestsTotal)
+	prometheus.MustRegister(httpRequestDuration)
+}
+
 // Backend service URLs
 var (
 	serviceA, _ = url.Parse("https://httpbin.org")
@@ -50,12 +55,27 @@ var apiKeys = []string{
 	"ed0caae6-0b4b-408f-b300-1545e05db00a",
 }
 
-func init() {
-	prometheus.MustRegister(httpRequestsTotal)
-	prometheus.MustRegister(httpRequestDuration)
-}
-
 func main() {
+
+	plugins := map[string]func(http.Handler) http.Handler{
+		"apiKeyMiddleware":      apiKeyMiddleware,
+		"stripPrefixMiddleware": stripPrefixMiddleware,
+	}
+
+	routerDefinitions := []*RouterDefinition{
+		NewRouterDefinition("/api/service-a", "https://httpbin.org", []string{"apiKeyMiddleware"}, nil),
+		NewRouterDefinition("/api/service-b", "https://httpbin.org", []string{"stripPrefixMiddleware"}, nil),
+		NewRouterDefinition("/api/service-c", "https://httpbin.org", nil, nil), // no middleware
+	}
+
+	for _, r := range routerDefinitions {
+		for _, mwname := range r.mwname {
+			if mw, ok := plugins[mwname]; ok {
+				r.addMiddleware(mw)
+			}
+		}
+	}
+
 	r := chi.NewRouter()
 
 	// Middleware
@@ -69,12 +89,27 @@ func main() {
 	})
 
 	r.Route("/api", func(r chi.Router) {
+
+		for _, def := range routerDefinitions {
+			url, _ := url.Parse(def.Upstream)
+			r.With(def.middleware...).Get(def.ListenPath, proxyHandlerB(url))
+		}
+
+		// routerDefinitions를 이용한 위 코드면 완성.  아래는 그냥 참고용 샘플 코드.
 		r.With(stripPrefixMiddleware).Get("/service-b/*", proxyHandlerB(serviceB))
-		r.With(apiKeyMiddleware).Get("/left", func(w http.ResponseWriter, r *http.Request) {
+
+		r.With(apiKeyMiddleware).Get("/left/*", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("left road"))
 		})
-		r.Mount("/service-a", apiKeyMiddleware(http.StripPrefix("/api/service-a", proxyHandlerA(serviceA))))
 
+		// url이 긴거 부터 먼저 매칭됨
+		r.With(apiKeyMiddleware).Get("/left/east/*", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("left east road"))
+		})
+
+		// 메소드를 컨트롤 할 수 없음
+		r.Mount("/service-a", apiKeyMiddleware(http.StripPrefix("/api/service-a", proxyHandlerA(serviceA))))
+		r.With(apiKeyMiddleware).Mount("/service-c", http.StripPrefix("/api/service-c", proxyHandlerA(serviceA)))
 	})
 
 	r.Handle("/metrics", promhttp.Handler())
@@ -137,4 +172,23 @@ func stripPrefixMiddleware(next http.Handler) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+type RouterDefinition struct {
+	ListenPath string
+	Upstream   string
+	mwname     []string
+	middleware []func(http.Handler) http.Handler
+}
+
+func NewRouterDefinition(listenPath, upstream string, mwname []string, middleware ...func(http.Handler) http.Handler) *RouterDefinition {
+	return &RouterDefinition{
+		ListenPath: listenPath,
+		Upstream:   upstream,
+		middleware: middleware,
+	}
+}
+
+func (r *RouterDefinition) addMiddleware(middleware func(http.Handler) http.Handler) {
+	r.middleware = append(r.middleware, middleware)
 }

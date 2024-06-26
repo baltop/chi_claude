@@ -1,5 +1,5 @@
-###
-GET http://localhost:8080/api/service-a/get
+###  "REST client"  extention for VS Code
+GET http://localhost:8080/api/left/user/top
 X-API-Key: a54cbcdd-4054-4364-acd1-717572d491cb
 
 

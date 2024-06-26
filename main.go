@@ -92,7 +92,8 @@ func main() {
 
 		for _, def := range routerDefinitions {
 			url, _ := url.Parse(def.Upstream)
-			r.With(def.middleware...).Get(def.ListenPath, proxyHandlerB(url))
+			// method가 * 이면?   r.With(def.middleware...).HandleFunc(def.ListenPath, proxyHandlerB(url))
+			r.With(def.middleware...).Method(def.Method, def.ListenPath, proxyHandlerB(url))
 		}
 
 		// routerDefinitions를 이용한 위 코드면 완성.  아래는 그냥 참고용 샘플 코드.
@@ -107,7 +108,7 @@ func main() {
 			w.Write([]byte("left east road"))
 		})
 
-		// 메소드를 컨트롤 할 수 없음
+		// mount 방식은 새로운 라우터를 만드는데, 모든 메소드를 컨트롤
 		r.Mount("/service-a", apiKeyMiddleware(http.StripPrefix("/api/service-a", proxyHandlerA(serviceA))))
 		r.With(apiKeyMiddleware).Mount("/service-c", http.StripPrefix("/api/service-c", proxyHandlerA(serviceA)))
 	})
@@ -176,14 +177,16 @@ func stripPrefixMiddleware(next http.Handler) http.Handler {
 
 type RouterDefinition struct {
 	ListenPath string
+	Method     string
 	Upstream   string
 	mwname     []string
 	middleware []func(http.Handler) http.Handler
 }
 
-func NewRouterDefinition(listenPath, upstream string, mwname []string, middleware ...func(http.Handler) http.Handler) *RouterDefinition {
+func NewRouterDefinition(listenPath, method, upstream string, mwname []string, middleware ...func(http.Handler) http.Handler) *RouterDefinition {
 	return &RouterDefinition{
 		ListenPath: listenPath,
+		Method:     method,
 		Upstream:   upstream,
 		middleware: middleware,
 	}
